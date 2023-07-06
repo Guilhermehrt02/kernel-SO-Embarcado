@@ -57,7 +57,7 @@ char l[20][130] = {
 void addProc(int creation_time, int duration, int priority); // adiciona processos
 void removeProc(); // remove processos
 void srtBatch(Process processos[], int n);// Escalonador Batch: Shortest Remaining-Time Next
-void multilevelFeedback(Process processos[], int n, int quantum[], int num_filas);// Escalonador Interativo: Múltiplas filas com realimentação
+void multilevelFeedback(Process processos[], int n);// Escalonador Interativo: Múltiplas filas com realimentação
 void kernelInit(void); // inicializador do kernel
 void kernelAddProc(void);
 void kernelLoop(void);
@@ -198,6 +198,53 @@ void srtBatch(Process processos[], int n) {
             } else {
                 process->last_execution = current_time;
                 process->waiting_time += current_time - process->last_execution;
+            }
+        } else {
+            current_time++;
+        }
+    }
+}
+
+void multilevelFeedback(Process processos[], int n) {
+    int current_time = 0;
+    int completed_processes = 0;
+
+    while (completed_processes < n) {
+        int selected_process = -1;
+
+        for (int i = 0; i < n; i++) {
+            if (!processos[i].completed && processos[i].creation_time <= current_time) {
+                selected_process = i;
+                break;
+            }
+        }
+
+        if (selected_process != -1) {
+            Process *process = &processos[selected_process];
+            int priority = process->priority;
+
+            if (process->duration <= clock_tick) {
+                // Executa o processo até o fim
+                current_time += process->duration;
+                process->duration = 0;
+                process->completed = true;
+                completed_processes++;
+            } else {
+                // Executa o processo por um quantum (clock_tick)
+                current_time += clock_tick;
+                process->duration -= clock_tick;
+            }
+
+            // Ajusta a prioridade do processo de acordo com o nível de feedback
+            if (priority > 1 && process->duration > 0) {
+                process->priority--;
+            }
+
+            // Atualiza o tempo de espera dos outros processos
+            for (int i = 0; i < n; i++) {
+                if (!processos[i].completed && i != selected_process) {
+                    processos[i].waiting_time += clock_tick;
+                }
             }
         } else {
             current_time++;
