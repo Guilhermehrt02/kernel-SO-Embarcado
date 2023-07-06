@@ -206,7 +206,7 @@ void srtBatch(Process processos[], int n) {
 }
 
 void multilevelFeedback(Process processos[], int n) {
-    int current_time = 0;
+    int current_time =0;
     int completed_processes = 0;
 
     while (completed_processes < n) {
