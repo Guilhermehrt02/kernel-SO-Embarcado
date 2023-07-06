@@ -2,7 +2,7 @@
 #include <stdbool.h>
 #include <string.h>
 
-#define MAX_PROCESSES 10 // o input deve ter o dobro
+#define MAX_PROCESSES 5 // o input deve ter o dobro
 
 // Enum para erros no retorno de funcoes
 typedef enum
@@ -25,6 +25,7 @@ typedef struct
 } Process;
 
 Process processes[MAX_PROCESSES]; // buffer circular
+Process waiting_queue[2*MAX_PROCESSES];
 int start, end;                   // parametros de controle
 int clock_tick;                   // quantum(controle de execucao dos processos)
 
@@ -53,27 +54,95 @@ char l[20][130] = {
 
 
 // functions
-void AddProc(int creation_time, int duration, int priority); // adiciona processos
+void addProc(int creation_time, int duration, int priority); // adiciona processos
 void removeProc(); // remove processos
 void srtBatch(Process processos[], int n);// Escalonador Batch: Shortest Remaining-Time Next
 void multilevelFeedback(Process processos[], int n, int quantum[], int num_filas);// Escalonador Interativo: Múltiplas filas com realimentação
 void kernelInit(void); // inicializador do kernel
+void kernelAddProc(void);
+void kernelLoop(void);
+int open_and_read_file(FILE *f);
+void print_process_list(Process *vet);
+
 
 // Main
 int main(int argc, char **argv)
 {
-    // Definindo variaveis
+    kernelInit();
+    kernelAddProc();
+    srtBatch(processes,MAX_PROCESSES);
+    print_process_list(processes);
+    //kernelLoop(srtBatch);
+    //kernelLoop(multilevelFeedback);
+}
+
+int open_and_read_file(FILE *f)
+{
+    f = fopen("input.txt", "r");
+    
+    if(f == NULL)
+        return ERROR_READ;
+
+    int v;
+    for(int i = 0; i < 2*MAX_PROCESSES; i++)
+    {
+        // Colocar os valores do arquivo nas variaveis do Processo
+        v = fscanf(f, "%d %d %d", &waiting_queue[i].creation_time, &waiting_queue[i].duration,
+            &waiting_queue[i].priority);
+        waiting_queue[i].completed = false;
+        waiting_queue[i].last_execution = waiting_queue[i].creation_time;
+        waiting_queue[i].waiting_time = 0;
+    }
+
+    if(f) fclose(f);
+    return OK;
+}
+
+void kernelInit(void)
+{
+    //inicializacao do buffer circular
+    start = 0;
+    end = 0;
+    //inicializacao da estrutura de controle de execucao
+    clock_tick = 5;
+
     error_list result = OK;
     FILE *file;
 
     // Ler o arquivo input.txt
-    if (result != 0)
-        return result;
+    open_and_read_file(file);
+    //if(result != 0) return result;
+    printf("lista de espera");
+    print_process_list(waiting_queue);
 
-    return result;
 
-    kernelInit();
-    kernelAddProc();
+}
+
+void kernelAddProc()
+{
+    //adiciona a quantidade maxima de processos
+    for (int i = 0; i < MAX_PROCESSES; i++)
+    {
+        addProc(waiting_queue[i].creation_time,waiting_queue[i].duration,waiting_queue[i].priority);
+    }
+}
+
+void kernelLoop(){
+    
+    for(int i=0;i < 2* MAX_PROCESSES;i++){
+        srtBatch(processes,MAX_PROCESSES);
+        
+    }
+    
+}
+
+void print_process_list(Process *vet)
+{
+    printf("========== LIST OF PROCESSES ==========\n");
+    printf("Creation Time    duration  Priority\n");
+    for(int i = 0; i < MAX_PROCESSES; i++)
+        printf("      %2d           %2d       %2d\n", vet[i].creation_time, vet[i].duration,
+            vet[i].priority);
 }
 
 void addProc(int creation_time, int duration, int priority)
@@ -96,187 +165,42 @@ void removeProc()
     }
 }
 
-void srtBatch(Process processos[], int n)
-{
-    int tempo_total = 0;
-    int i, j;
+void srtBatch(Process processos[], int n) {
+    int current_time = 0;
+    int completed_processes = 0;
 
-    // Ordenar os processos por tempo de chegada
-    for (i = 0; i < n - 1; i++)
-    {
-        for (j = 0; j < n - i - 1; j++)
-        {
-            if (processos[j].creation_time > processos[j + 1].creation_time)
-            {
-                Process temp = processos[j];
-                processos[j] = processos[j + 1];
-                processos[j + 1] = temp;
-            }
-        }
-    }
+    while (completed_processes < n) {
+        int shortest_remaining_time = -1;
+        int selected_process = -1;
 
-    printf("Escalonamento SRTN (Batch):\n");
+        for (int i = 0; i < n; i++) {
+            if (!processos[i].completed && processos[i].creation_time <= current_time) {
+                int remaining_time = processos[i].duration - (current_time - processos[i].last_execution);
 
-    // Executar os processos
-    for (i = 0; i < n; i++)
-    {
-        processos[i].waiting_time = 0;
-        processos[i].last_execution = 0;
-        processos[i].completed = false;
-        tempo_total += processos[i].duration;
-    }
-
-    int tempo_atual = 0;
-    int processo_atual = -1;
-    int concluidos = 0;
-
-    while (concluidos < n)
-    {
-        int menor_tempo_restante = tempo_total + 1;
-        int proximo_processo = -1;
-
-        // Encontrar o próximo processo a ser executado
-        for (i = 0; i < n; i++)
-        {
-            if (!processos[i].completed && processos[i].creation_time <= tempo_atual &&
-                (processos[i].duration - processos[i].last_execution) < menor_tempo_restante)
-            {
-                menor_tempo_restante = processos[i].duration - processos[i].last_execution;
-                proximo_processo = i;
+                if (shortest_remaining_time == -1 || remaining_time < shortest_remaining_time) {
+                    shortest_remaining_time = remaining_time;
+                    selected_process = i;
+                }
             }
         }
 
-        if (proximo_processo == -1)
-        {
-            tempo_atual++;
-            continue;
-        }
+        if (selected_process != -1) {
+            Process *process = &processos[selected_process];
 
-        // Executar o próximo processo por 1 unidade de tempo
-        processos[proximo_processo].last_execution++;
-        tempo_atual++;
+            // Executa o processo pelo tempo de clock_tick (quantum)
+            int execution_time = shortest_remaining_time < clock_tick ? shortest_remaining_time : clock_tick;
+            current_time += execution_time;
+            process->duration -= execution_time;
 
-        if (processos[proximo_processo].last_execution == processos[proximo_processo].duration)
-        {
-            printf("Tempo %d: Processo %d concluído\n", tempo_atual, proximo_processo);
-            processos[proximo_processo].completed = true;
-            concluidos++;
+            if (process->duration == 0) {
+                process->completed = true;
+                completed_processes++;
+            } else {
+                process->last_execution = current_time;
+                process->waiting_time += current_time - process->last_execution;
+            }
+        } else {
+            current_time++;
         }
     }
-
-    printf("Tempo total de execução: %d unidades de tempo\n", tempo_total);
 }
-
-void multilevelFeedback(Process processos[], int n, int quantum[], int num_filas)
-{
-    int tempo_total = 0;
-    int i, j;
-
-    // Ordenar os processos por tempo de chegada
-    for (i = 0; i < n - 1; i++)
-    {
-        for (j = 0; j < n - i - 1; j++)
-        {
-            if (processos[j].creation_time > processos[j + 1].creation_time)
-            {
-                Process temp = processos[j];
-                processos[j] = processos[j + 1];
-                processos[j + 1] = temp;
-            }
-        }
-    }
-
-    printf("Escalonamento Multilevel Feedback:\n");
-
-    // Inicializar as filas com os processos
-    int fila_atual[num_filas];
-    for (i = 0; i < num_filas; i++)
-    {
-        fila_atual[i] = -1;
-    }
-
-    // Executar os processos
-    for (i = 0; i < n; i++)
-    {
-        processos[i].waiting_time = 0;
-        processos[i].last_execution = 0;
-        processos[i].completed = false;
-        tempo_total += processos[i].duration;
-    }
-
-    int tempo_atual = 0;
-    int concluidos = 0;
-
-    while (concluidos < n)
-    {
-        // Verificar se há algum processo na fila atual
-        int processo_atual = -1;
-        for (i = 0; i < num_filas; i++)
-        {
-            if (fila_atual[i] != -1)
-            {
-                processo_atual = fila_atual[i];
-                break;
-            }
-        }
-
-        if (processo_atual == -1)
-        {
-            tempo_atual++;
-            continue;
-        }
-
-        // Executar o processo atual por um quantum
-        int fila_processo_atual = i;
-        int quantum_atual = quantum[fila_processo_atual];
-        int tempo_executado = 0;
-
-        while (tempo_executado < quantum_atual)
-        {
-            processos[processo_atual].last_execution++;
-            tempo_atual++;
-            tempo_executado++;
-
-            if (processos[processo_atual].last_execution == processos[processo_atual].duration)
-            {
-                printf("Tempo %d: Processo %d concluído\n", tempo_atual, processo_atual);
-                processos[processo_atual].completed = true;
-                concluidos++;
-                break;
-            }
-        }
-
-        if (tempo_executado == quantum_atual)
-        {
-            processos[processo_atual].waiting_time += tempo_atual - processos[processo_atual].last_execution;
-            fila_atual[fila_processo_atual] = processo_atual;
-        }
-        else
-        {
-            fila_atual[fila_processo_atual] = -1;
-        }
-
-        // Realimentação: mover o processo para a próxima fila com prioridade mais baixa
-        if (fila_processo_atual < num_filas - 1 && fila_atual[fila_processo_atual] != -1)
-        {
-            fila_atual[fila_processo_atual + 1] = fila_atual[fila_processo_atual];
-            fila_atual[fila_processo_atual] = -1;
-        }
-    }
-
-    printf("Tempo total de execução: %d unidades de tempo\n", tempo_total);
-}
-
-void kernelInit(void)
-{
-    start = 0;
-    end = 0;
-    clock_tick = 0;
-}
-
-void kernelAddProc(ptrFunc newFunc)
-{
-    
-}
-
-
